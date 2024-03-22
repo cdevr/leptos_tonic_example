@@ -2,20 +2,16 @@ use futures::lock::Mutex;
 use std::sync::Arc;
 use tonic::transport::Server;
 
-use proto::chat_service_server::ChatService;
+use backend::proto::chat_service_server::ChatService;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::proto::chat_service_server::ChatServiceServer;
-
-mod proto {
-    tonic::include_proto!("chat");
-}
+use backend::proto::chat_service_server::ChatServiceServer;
 
 #[derive(Default)]
 struct Chat {
-    user_list: Mutex<proto::UserList>,
+    user_list: Mutex<backend::proto::UserList>,
     messages: Mutex<
-        Vec<Arc<Mutex<tokio::sync::mpsc::Sender<Result<proto::ChatMessage, tonic::Status>>>>>,
+        Vec<Arc<Mutex<tokio::sync::mpsc::Sender<tonic::Result<backend::proto::ChatMessage>>>>>,
     >,
 }
 
@@ -23,8 +19,8 @@ struct Chat {
 impl ChatService for Chat {
     async fn join(
         &self,
-        request: tonic::Request<proto::User>,
-    ) -> std::result::Result<tonic::Response<proto::JoinResponse>, tonic::Status> {
+        request: tonic::Request<backend::proto::User>,
+    ) -> tonic::Result<tonic::Response<backend::proto::JoinResponse>> {
         let new_user = request.into_inner();
         let mut user_list = self.user_list.lock().await;
         let mut response = None;
@@ -36,12 +32,12 @@ impl ChatService for Chat {
             .is_none()
         {
             user_list.users.push(new_user);
-            let _ = response.insert(tonic::Response::new(proto::JoinResponse {
+            let _ = response.insert(tonic::Response::new(backend::proto::JoinResponse {
                 error: 0,
                 msg: String::from("Success"),
             }));
         } else {
-            let _ = response.insert(tonic::Response::new(proto::JoinResponse {
+            let _ = response.insert(tonic::Response::new(backend::proto::JoinResponse {
                 error: 1,
                 msg: String::from("User already exists."),
             }));
@@ -52,9 +48,9 @@ impl ChatService for Chat {
 
     async fn send_msg(
         &self,
-        request: tonic::Request<proto::ChatMessage>,
-    ) -> std::result::Result<tonic::Response<proto::Empty>, tonic::Status> {
-        let msg = request.into_inner();
+        request: tonic::Request<backend::proto::ChatMessage>,
+    ) -> tonic::Result<tonic::Response<backend::proto::Empty>> {
+        let msg = dbg!(request.into_inner());
         let observers = self.messages.lock().await;
         // let mut observers = tokio_stream::iter(observers.iter());
 
@@ -66,13 +62,16 @@ impl ChatService for Chat {
             });
         });
 
-        Ok(tonic::Response::new(proto::Empty {}))
+        Ok(tonic::Response::new(backend::proto::Empty {}))
     }
 
+    ///TODO: Sending the receiver over to the client works functionally but if the client is refreshed the
+    ///reveiver channel lingers. Will need to think of a way to remove expired receivers from the
+    ///list.     
     async fn recieve_msg(
         &self,
-        _request: tonic::Request<proto::Empty>,
-    ) -> std::result::Result<tonic::Response<Self::RecieveMsgStream>, tonic::Status> {
+        _request: tonic::Request<backend::proto::Empty>,
+    ) -> tonic::Result<tonic::Response<Self::RecieveMsgStream>> {
         let (sender, receiver) = tokio::sync::mpsc::channel(1000);
 
         self.messages
@@ -86,13 +85,13 @@ impl ChatService for Chat {
 
     async fn get_all_users(
         &self,
-        _request: tonic::Request<proto::Empty>,
-    ) -> Result<tonic::Response<proto::UserList>, tonic::Status> {
+        _request: tonic::Request<backend::proto::Empty>,
+    ) -> Result<tonic::Response<backend::proto::UserList>, tonic::Status> {
         let user_list = self.user_list.lock().await;
         Ok(tonic::Response::new(user_list.clone()))
     }
 
-    type RecieveMsgStream = ReceiverStream<Result<proto::ChatMessage, tonic::Status>>;
+    type RecieveMsgStream = ReceiverStream<tonic::Result<backend::proto::ChatMessage>>;
 }
 
 #[tokio::main]
