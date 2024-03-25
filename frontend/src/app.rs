@@ -9,6 +9,54 @@ use leptos_router::*;
 use prost::Message;
 use sha2::{Digest, Sha256};
 
+#[component]
+pub fn LoginWindow(is_logged_in: WriteSignal<bool>, username_handle: WriteSignal<String>) -> impl IntoView {
+    let (username, set_username) = create_signal(String::new());
+
+    #[server]
+    pub async fn join(username: String) -> Result<bool, ServerFnError> {
+        use backend::proto::chat_service_client::*;
+        let mut client = ChatServiceClient::connect("https://[::1]:50051")
+            .await
+            .expect("Failed to esablish connection with backend");
+
+        let request = tonic::Request::new(backend::proto::User{ id: "0".into(), name: username });
+
+        let response = client.join(request).await.expect("failed to query login").into_inner();
+
+        Ok(response.error == 0)
+    }
+
+    view! {
+        <div class="card card-compact w-96 h-96 bg-base-100 shadow-xl">
+            // <figure><img src="https://daisyui.com/images/stock/photo-1606107557195-0e29a4b5b4aa.jpg" alt="Shoes" /></figure>
+            <div class="card-body">
+                <h2 class="card-title justify-center">User Login</h2>
+                <div>
+                    <label class="input input-bordered flex items-center gap-2">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4 opacity-70"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM12.735 14c.618 0 1.093-.561.872-1.139a6.002 6.002 0 0 0-11.215 0c-.22.578.254 1.139.872 1.139h9.47Z" /></svg>
+                      <input type="text" class="grow" on:input=move |ev| {
+                            set_username(event_target_value(&ev));
+                        } prop:value=username placeholder="Username" />
+                    </label>
+                </div>
+                <div class="card-actions justify-end">
+                    <button class="btn btn-primary" on:click=move |_| {
+                            spawn_local(async move {
+                            if let Ok(true) = join(username.get()).await {
+                                is_logged_in.set(true);
+                                username_handle.set(username.get());
+                            }
+                        });
+                    }>
+                        Login
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+}
+
 //This is the best way I could find to transfer the chat message from the server over to the
 //client. Create a replicated struct of whats on server side using prost which has functinality to
 //convert to and from bytes using prost::Message trait.
@@ -33,7 +81,7 @@ fn sha256_username(username: &str) -> String {
 }
 
 #[component]
-pub fn ChatWindow() -> impl IntoView {
+pub fn ChatWindow(username: String) -> impl IntoView {
     let (messages, set_messages) = create_signal(vec![]);
 
     #[cfg(feature = "ssr")]
@@ -92,9 +140,10 @@ pub fn ChatWindow() -> impl IntoView {
             .iter()
             .rev()
             .map(|message| Message::decode(&message[..]).expect("Failed to decode")) //https://www.gravatar.com/avatar/00000000000000000000000000000000?d=identicon&f=y
+            .inspect(|msg: &ChatMessage| println!("{:?}", msg.from))
             .map(|message: ChatMessage| {
                 view! {
-                    <div class="chat chat-start">
+                    <div class={ if message.from == username { "chat chat-start" } else { "chat chat-end" }}>
                         <div class="chat-image avatar">
                             <div class="w-10 rounded-full">
                                 <img alt={format!("Gravatar Identicon for {}", message.from.clone())} 
@@ -157,31 +206,46 @@ pub fn App() -> impl IntoView {
 #[component]
 fn HomePage() -> impl IntoView {
     // Creates a reactive value to update the button
-    let (message, set_message) = create_signal(String::from("Enter text here."));
+    let (username, set_username) = create_signal(String::new());
+    let (message, set_message) = create_signal(String::new());
+    let (logged_in, set_logged_in) = create_signal(false);
 
     view! {
-        {ChatWindow()}
-        <div class="flex flex-1 place-content-center gap-1">
-            <input type="text" class="input input-bordered flex-[0_0_80vw]" on:input=move |ev| {
-                set_message(event_target_value(&ev));
-            } prop:value=message/>
-            <button class="btn btn-primary" on:click=move |_| {
-                let value = message.get();
-                spawn_local(async { let _ = send_message(value).await; });
-                set_message("".into());
-            }>"Send"</button>
-        </div>
+        { move || if !logged_in() {
+                view!{
+                    <div class="flex place-items-center justify-center w-full min-h-screen">
+                    <LoginWindow is_logged_in=set_logged_in username_handle=set_username/>
+                    </div>
+                }.into_view()
+            } else {
+                view!{
+                    <ChatWindow username=username()/>
+                    <div class="flex flex-1 place-content-center gap-1">
+                        <input type="text" class="input input-bordered flex-[0_0_80vw]" on:input=move |ev| {
+                            set_message(event_target_value(&ev));
+                        } prop:value=message placeholder="Enter text here."/>
+                        <button class="btn btn-primary" on:click=move |_| {
+                            let message = message.get();
+                            let username = username.get();
+
+                            spawn_local(async { let _ = send_message(username, message).await; });
+                            set_message("".into());
+                        }>"Send"</button>
+                    </div>
+                }.into_view()
+            }
+        }
     }
 }
 
 #[server]
-pub async fn send_message(msg: String) -> Result<(), ServerFnError> {
+pub async fn send_message(from: String, msg: String) -> Result<(), ServerFnError> {
     use backend::proto::chat_service_client::ChatServiceClient;
     let mut client = ChatServiceClient::connect("http://[::1]:50051").await?;
 
     //TODO: Set this up with correct username once login functionality is done
     let request = tonic::Request::new(backend::proto::ChatMessage {
-        from: "test".into(),
+        from,
         msg,
         time: "00:04".into(),
     });
