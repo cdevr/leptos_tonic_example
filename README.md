@@ -4,8 +4,8 @@ A rust implementation of a client and server chat.
 
 This is a minimal chat client and server example for using [`Leptos`](https://github.com/leptos-rs/leptos) with [`protobufs`](https://protobuf.dev/) using the [`tonic`](https://github.com/hyperium/tonic) crate.
 This allows for us to provide powerful gRPC streams to the client that will recieve any messages that hit the server.
-Currently the implementation requires the frontend to also generate a version of the [`ChatMessage`] struct with [`prost`](https://github.com/tokio-rs/prost).
-Using `prost`s [`Message`] trait to convert between the struct implementation and as a byte array. This also requires the
+Currently the implementation requires the frontend to also generate a version of the `ChatMessage` struct with [`prost`](https://github.com/tokio-rs/prost).
+Using `prost`s `Message` trait to convert between the struct implementation and as a byte array. This also requires the
 Axum SSR version of [`Leptos`](https://github.com/leptos-rs/start-axum) as there are issues integrating with the `tonic` crate as it has dependencies in [`tokio`](https://github.com/tokio-rs/tokio/) that interferes
 with converting to Wasm.
 
