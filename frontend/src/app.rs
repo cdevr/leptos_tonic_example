@@ -44,8 +44,8 @@ pub fn LoginWindow(is_logged_in: WriteSignal<bool>, username_handle: WriteSignal
                     <button class="btn btn-primary" on:click=move |_| {
                             spawn_local(async move {
                             if let Ok(true) = join(username.get()).await {
-                                is_logged_in.set(true);
                                 username_handle.set(username.get());
+                                is_logged_in.set(true);
                             }
                         });
                     }>
@@ -219,7 +219,7 @@ fn HomePage() -> impl IntoView {
                 }.into_view()
             } else {
                 view!{
-                    <ChatWindow username=username()/>
+                    <ChatWindow username=username.get()/>
                     <div class="flex flex-1 place-content-center gap-1">
                         <input type="text" class="input input-bordered flex-[0_0_80vw]" on:input=move |ev| {
                             set_message(event_target_value(&ev));
@@ -240,15 +240,17 @@ fn HomePage() -> impl IntoView {
 
 #[server]
 pub async fn send_message(from: String, msg: String) -> Result<(), ServerFnError> {
+    use chrono::{Local, Timelike};
     use backend::proto::chat_service_client::ChatServiceClient;
     let mut client = ChatServiceClient::connect("http://[::1]:50051").await?;
+    let current_time = Local::now();
 
-    //TODO: Set this up with correct username once login functionality is done
     let request = tonic::Request::new(backend::proto::ChatMessage {
         from,
         msg,
-        time: "00:04".into(),
+        time: format!("{}:{}", current_time.hour(), current_time.minute()),
     });
+
 
     let response = client.send_msg(request).await?;
 

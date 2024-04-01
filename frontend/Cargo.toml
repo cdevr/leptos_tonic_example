@@ -26,6 +26,7 @@ http = "1"
 bytemuck = { version = "1.15.0", features = ["derive"] }
 sha2 = "0.10.8"
 hex = "0.4.3"
+chrono = "0.4.37"
 
 [dependencies.backend]
 path = "../backend"
