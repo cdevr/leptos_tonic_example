@@ -1,17 +1,18 @@
 use crate::error_template::{AppError, ErrorTemplate};
 use futures::StreamExt;
-use leptos::{
-    server_fn::codec::{ByteStream, Streaming},
-    *,
-};
+use leptos::prelude::*;
+use leptos::server_fn::codec::{ByteStream, Streaming};
+use leptos::task::spawn_local;
+use leptos::web_sys;
 use leptos_meta::*;
-use leptos_router::*;
+use leptos_router::components::*;
+use leptos_router::StaticSegment;
 use prost::Message;
 use sha2::{Digest, Sha256};
 
 #[component]
 pub fn LoginWindow(is_logged_in: WriteSignal<bool>, username_handle: WriteSignal<String>) -> impl IntoView {
-    let (username, set_username) = create_signal(String::new());
+    let (username, set_username) = signal(String::new());
 
     #[server]
     pub async fn join(username: String) -> Result<bool, ServerFnError> {
@@ -29,23 +30,30 @@ pub fn LoginWindow(is_logged_in: WriteSignal<bool>, username_handle: WriteSignal
 
     view! {
         <div class="card card-compact w-96 h-96 bg-base-100 shadow-xl">
-            // <figure><img src="https://daisyui.com/images/stock/photo-1606107557195-0e29a4b5b4aa.jpg" alt="Shoes" /></figure>
             <div class="card-body">
                 <h2 class="card-title justify-center">User Login</h2>
                 <div>
                     <label class="input input-bordered flex items-center gap-2">
                       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4 opacity-70"><path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM12.735 14c.618 0 1.093-.561.872-1.139a6.002 6.002 0 0 0-11.215 0c-.22.578.254 1.139.872 1.139h9.47Z" /></svg>
                       <input type="text" class="grow" on:input=move |ev| {
-                            set_username(event_target_value(&ev));
+                            set_username.set(event_target_value(&ev));
                         } prop:value=username placeholder="Username" />
                     </label>
                 </div>
                 <div class="card-actions justify-end">
-                    <button class="btn btn-primary" on:click=move |_| {
-                            spawn_local(async move {
-                            if let Ok(true) = join(username.get()).await {
-                                username_handle.set(username.get());
-                                is_logged_in.set(true);
+                    <button type="button" class="btn btn-primary" on:click=move |_| {
+                        leptos::logging::log!("Login button clicked");
+                        let username_value = username.get_untracked();
+                        spawn_local(async move {
+                            leptos::logging::log!("Calling join server function");
+                            match join(username_value.clone()).await {
+                                Ok(true) => {
+                                    leptos::logging::log!("Join successful");
+                                    username_handle.set(username_value);
+                                    is_logged_in.set(true);
+                                }
+                                Ok(false) => leptos::logging::log!("Join failed: returned false"),
+                                Err(e) => leptos::logging::log!("Join error: {:?}", e),
                             }
                         });
                     }>
@@ -82,7 +90,7 @@ fn sha256_username(username: &str) -> String {
 
 #[component]
 pub fn ChatWindow(username: String) -> impl IntoView {
-    let (messages, set_messages) = create_signal(vec![]);
+    let (messages, set_messages) = signal(vec![]);
 
     #[cfg(feature = "ssr")]
     mod chat_recv {
@@ -121,7 +129,7 @@ pub fn ChatWindow(username: String) -> impl IntoView {
         Ok(ByteStream::new(data))
     }
 
-    create_effect(move |_| {
+    Effect::new(move |_| {
         spawn_local(async move {
             let mut stream = handle_messages()
                 .await
@@ -146,17 +154,17 @@ pub fn ChatWindow(username: String) -> impl IntoView {
                     <div class={ if message.from == username { "chat chat-start" } else { "chat chat-end" }}>
                         <div class="chat-image avatar">
                             <div class="w-10 rounded-full">
-                                <img alt={format!("Gravatar Identicon for {}", message.from.clone())} 
-                        src={ 
+                                <img alt={format!("Gravatar Identicon for {}", message.from.clone())}
+                        src={
                             format!("https://www.gravatar.com/avatar/{}?d=identicon&f=y", sha256_username(&message.from))}
                         />
                             </div>
                         </div>
                         <div class="chat-header flex gap-2">
-                            {message.from}
-                            <time class="text xs opacity-50">{message.time}</time>
+                            {message.from.clone()}
+                            <time class="text xs opacity-50">{message.time.clone()}</time>
                         </div>
-                        <div class="chat chat-bubble">{message.msg}</div>
+                        <div class="chat chat-bubble">{message.msg.clone()}</div>
                     </div>
                 }
             })
@@ -177,25 +185,24 @@ pub fn App() -> impl IntoView {
         // injects a stylesheet into the document <head>
         // id=leptos means cargo-leptos will hot-reload this stylesheet
         <Stylesheet id="leptos" href="/pkg/frontend.css"/>
-        <link href="https://cdn.jsdelivr.net/npm/daisyui@4.7.3/dist/full.min.css" rel="stylesheet" type="text/css" />
-        <script src="https://cdn.tailwindcss.com"></script>
-
+        <Link href="https://cdn.jsdelivr.net/npm/daisyui@4.7.3/dist/full.min.css" rel="stylesheet" type_="text/css" />
+        <Script src="https://cdn.tailwindcss.com"></Script>
 
         // sets the document title
         <Title text="Welcome to Leptos"/>
 
         // content for this welcome page
-        <Router fallback=|| {
-            let mut outside_errors = Errors::default();
-            outside_errors.insert_with_default_key(AppError::NotFound);
-            view! {
-                <ErrorTemplate outside_errors/>
-            }
-            .into_view()
-        }>
+        <Router>
             <main class="min-h-screen flex flex-col">
-                <Routes>
-                    <Route path="" view=HomePage/>
+                <Routes fallback=|| {
+                    let mut outside_errors = Errors::default();
+                    outside_errors.insert_with_default_key(AppError::NotFound);
+                    view! {
+                        <ErrorTemplate outside_errors/>
+                    }
+                    .into_view()
+                }>
+                    <Route path=StaticSegment("") view=HomePage/>
                 </Routes>
             </main>
         </Router>
@@ -206,35 +213,39 @@ pub fn App() -> impl IntoView {
 #[component]
 fn HomePage() -> impl IntoView {
     // Creates a reactive value to update the button
-    let (username, set_username) = create_signal(String::new());
-    let (message, set_message) = create_signal(String::new());
-    let (logged_in, set_logged_in) = create_signal(false);
+    let (username, set_username) = signal(String::new());
+    let (message, set_message) = signal(String::new());
+    let (logged_in, set_logged_in) = signal(false);
 
     view! {
-        { move || if !logged_in() {
+        <div>
+        { move || if !logged_in.get() {
                 view!{
                     <div class="flex place-items-center justify-center w-full min-h-screen">
-                    <LoginWindow is_logged_in=set_logged_in username_handle=set_username/>
+                        <LoginWindow is_logged_in=set_logged_in username_handle=set_username/>
                     </div>
-                }.into_view()
+                }.into_any()
             } else {
                 view!{
-                    <ChatWindow username=username.get()/>
-                    <div class="flex flex-1 place-content-center gap-1">
-                        <input type="text" class="input input-bordered flex-[0_0_80vw]" on:input=move |ev| {
-                            set_message(event_target_value(&ev));
-                        } prop:value=message placeholder="Enter text here."/>
-                        <button class="btn btn-primary" on:click=move |_| {
-                            let message = message.get();
-                            let username = username.get();
+                    <>
+                        <ChatWindow username=username.get()/>
+                        <div class="flex flex-1 place-content-center gap-1">
+                            <input type="text" class="input input-bordered flex-[0_0_80vw]" on:input=move |ev| {
+                                set_message.set(event_target_value(&ev));
+                            } prop:value=message placeholder="Enter text here."/>
+                            <button class="btn btn-primary" on:click=move |_| {
+                                let message = message.get();
+                                let username = username.get();
 
-                            spawn_local(async { let _ = send_message(username, message).await; });
-                            set_message("".into());
-                        }>"Send"</button>
-                    </div>
-                }.into_view()
+                                spawn_local(async { let _ = send_message(username, message).await; });
+                                set_message.set("".into());
+                            }>"Send"</button>
+                        </div>
+                    </>
+                }.into_any()
             }
         }
+        </div>
     }
 }
 
@@ -252,7 +263,7 @@ pub async fn send_message(from: String, msg: String) -> Result<(), ServerFnError
     });
 
 
-    let response = client.send_msg(request).await?;
+    let _response = client.send_msg(request).await?;
 
     Ok(())
 }

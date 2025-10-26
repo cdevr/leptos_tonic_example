@@ -21,7 +21,9 @@ impl ChatService for Chat {
         &self,
         request: tonic::Request<backend::proto::User>,
     ) -> tonic::Result<tonic::Response<backend::proto::JoinResponse>> {
+        println!("[join] Method called");
         let new_user = request.into_inner();
+        println!("[join] User: {:?}", new_user);
         let mut user_list = self.user_list.lock().await;
         let mut response = None;
 
@@ -50,6 +52,7 @@ impl ChatService for Chat {
         &self,
         request: tonic::Request<backend::proto::ChatMessage>,
     ) -> tonic::Result<tonic::Response<backend::proto::Empty>> {
+        println!("[send_msg] Method called");
         let msg = dbg!(request.into_inner());
         let observers = self.messages.lock().await;
         // let mut observers = tokio_stream::iter(observers.iter());
@@ -72,6 +75,7 @@ impl ChatService for Chat {
         &self,
         _request: tonic::Request<backend::proto::Empty>,
     ) -> tonic::Result<tonic::Response<Self::RecieveMsgStream>> {
+        println!("[recieve_msg] Method called");
         let (sender, receiver) = tokio::sync::mpsc::channel(1000);
 
         self.messages
@@ -87,6 +91,7 @@ impl ChatService for Chat {
         &self,
         _request: tonic::Request<backend::proto::Empty>,
     ) -> Result<tonic::Response<backend::proto::UserList>, tonic::Status> {
+        println!("[get_all_users] Method called");
         let user_list = self.user_list.lock().await;
         Ok(tonic::Response::new(user_list.clone()))
     }

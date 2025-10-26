@@ -2,7 +2,7 @@
 #[tokio::main]
 async fn main() {
     use axum::Router;
-    use leptos::*;
+    use leptos::prelude::*;
     use leptos_axum::{generate_route_list, LeptosRoutes};
     use frontend::app::*;
     use frontend::fileserv::file_and_error_handler;
@@ -12,19 +12,40 @@ async fn main() {
     // <https://github.com/leptos-rs/start-axum#executing-a-server-on-a-remote-machine-without-the-toolchain>
     // Alternately a file can be specified such as Some("Cargo.toml")
     // The file would need to be included with the executable when moved to deployment
-    let conf = get_configuration(None).await.unwrap();
+    let conf = get_configuration(None).unwrap();
     let leptos_options = conf.leptos_options;
     let addr = leptos_options.site_addr;
     let routes = generate_route_list(App);
 
     // build our application with a route
     let app = Router::new()
-        .leptos_routes(&leptos_options, routes, App)
+        .leptos_routes(&leptos_options, routes, {
+            let leptos_options = leptos_options.clone();
+            move || {
+                use leptos::prelude::*;
+                use leptos_meta::MetaTags;
+                view! {
+                    <!DOCTYPE html>
+                    <html lang="en">
+                        <head>
+                            <meta charset="utf-8"/>
+                            <meta name="viewport" content="width=device-width, initial-scale=1"/>
+                            <AutoReload options=leptos_options.clone() />
+                            <HydrationScripts options=leptos_options.clone()/>
+                            <MetaTags/>
+                        </head>
+                        <body>
+                            <App/>
+                        </body>
+                    </html>
+                }
+            }
+        })
         .fallback(file_and_error_handler)
         .with_state(leptos_options);
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    logging::log!("listening on http://{}", &addr);
+    println!("listening on http://{}", &addr);
     axum::serve(listener, app.into_make_service())
         .await
         .unwrap();
