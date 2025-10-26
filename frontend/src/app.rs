@@ -3,7 +3,6 @@ use futures::StreamExt;
 use leptos::prelude::*;
 use leptos::server_fn::codec::{ByteStream, Streaming};
 use leptos::task::spawn_local;
-use leptos::web_sys;
 use leptos_meta::*;
 use leptos_router::components::*;
 use leptos_router::StaticSegment;

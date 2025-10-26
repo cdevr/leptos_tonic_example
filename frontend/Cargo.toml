@@ -18,7 +18,7 @@ tower = { version = "0.4", optional = true }
 tower-http = { version = "0.5", features = ["fs"], optional = true }
 prost = "0.12"
 tonic = { version = "0.11", optional = true }
-futures = "0.3.30"
+futures = "0.3.31"
 wasm-bindgen = "0.2"
 thiserror = "1"
 tracing = { version = "0.1", optional = true }
@@ -26,7 +26,7 @@ http = "1"
 bytemuck = { version = "1.15.0", features = ["derive"] }
 sha2 = "0.10.8"
 hex = "0.4.3"
-chrono = "0.4.37"
+chrono = "0.4.42"
 
 [dependencies.backend]
 path = "../backend"
