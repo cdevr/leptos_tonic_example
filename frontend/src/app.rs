@@ -21,12 +21,28 @@ pub fn LoginWindow(is_logged_in: WriteSignal<bool>, username_handle: WriteSignal
 
     #[server]
     pub async fn join(username: String) -> Result<bool, ServerFnError> {
+        // Validate username
+        let username = username.trim();
+        if username.is_empty() {
+            return Err(ServerFnError::new("Username cannot be empty".to_string()));
+        }
+        if username.len() > 50 {
+            return Err(ServerFnError::new("Username too long (max 50 characters)".to_string()));
+        }
+        if username.len() < 2 {
+            return Err(ServerFnError::new("Username too short (min 2 characters)".to_string()));
+        }
+        // Check for valid characters (alphanumeric, spaces, underscores, hyphens)
+        if !username.chars().all(|c| c.is_alphanumeric() || c == ' ' || c == '_' || c == '-') {
+            return Err(ServerFnError::new("Username contains invalid characters".to_string()));
+        }
+
         use backend::proto::chat_service_client::*;
         let mut client = ChatServiceClient::connect(GRPC_ENDPOINT)
             .await
             .map_err(|e| ServerFnError::new(format!("Failed to establish connection with backend: {}", e)))?;
 
-        let request = tonic::Request::new(backend::proto::User{ id: "0".into(), name: username });
+        let request = tonic::Request::new(backend::proto::User{ id: "0".into(), name: username.to_string() });
 
         let response = client.join(request)
             .await
@@ -284,15 +300,30 @@ fn HomePage() -> impl IntoView {
 
 #[server]
 pub async fn send_message(from: String, msg: String) -> Result<(), ServerFnError> {
+    // Validate message
+    let msg = msg.trim();
+    if msg.is_empty() {
+        return Err(ServerFnError::new("Message cannot be empty".to_string()));
+    }
+    if msg.len() > 1000 {
+        return Err(ServerFnError::new("Message too long (max 1000 characters)".to_string()));
+    }
+
+    // Validate username
+    let from = from.trim();
+    if from.is_empty() {
+        return Err(ServerFnError::new("Username cannot be empty".to_string()));
+    }
+
     use chrono::{Local, Timelike};
     use backend::proto::chat_service_client::ChatServiceClient;
     let mut client = ChatServiceClient::connect(GRPC_ENDPOINT).await?;
     let current_time = Local::now();
 
     let request = tonic::Request::new(backend::proto::ChatMessage {
-        from,
-        msg,
-        time: format!("{}:{}", current_time.hour(), current_time.minute()),
+        from: from.to_string(),
+        msg: msg.to_string(),
+        time: format!("{:02}:{:02}", current_time.hour(), current_time.minute()),
     });
 
 
