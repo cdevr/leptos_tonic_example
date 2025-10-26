@@ -54,23 +54,31 @@ impl ChatService for Chat {
     ) -> tonic::Result<tonic::Response<backend::proto::Empty>> {
         println!("[send_msg] Method called");
         let msg = dbg!(request.into_inner());
-        let observers = self.messages.lock().await;
-        // let mut observers = tokio_stream::iter(observers.iter());
+        let mut observers = self.messages.lock().await;
 
-        observers.iter().for_each(|observer| {
+        // Send to all observers and collect indices of failed sends
+        let mut failed_indices = Vec::new();
+        for (idx, observer) in observers.iter().enumerate() {
             let observer = Arc::clone(&observer);
             let msg = msg.clone();
-            tokio::spawn(async move {
-                observer.lock().await.send(Ok(msg)).await.unwrap();
-            });
-        });
+
+            // Try to send, mark for removal if channel is closed
+            if observer.lock().await.send(Ok(msg)).await.is_err() {
+                failed_indices.push(idx);
+            }
+        }
+
+        // Remove disconnected observers (iterate in reverse to maintain indices)
+        for idx in failed_indices.into_iter().rev() {
+            observers.remove(idx);
+            println!("[send_msg] Removed disconnected receiver at index {}", idx);
+        }
 
         Ok(tonic::Response::new(backend::proto::Empty {}))
     }
 
-    ///TODO: Sending the receiver over to the client works functionally but if the client is refreshed the
-    ///reveiver channel lingers. Will need to think of a way to remove expired receivers from the
-    ///list.     
+    /// Returns a stream of chat messages. Receivers are automatically cleaned up
+    /// when clients disconnect (handled in send_msg).
     async fn recieve_msg(
         &self,
         _request: tonic::Request<backend::proto::Empty>,

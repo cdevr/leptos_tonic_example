@@ -9,6 +9,12 @@ use leptos_router::StaticSegment;
 use prost::Message;
 use sha2::{Digest, Sha256};
 
+// gRPC backend endpoint - can be overridden with GRPC_ENDPOINT environment variable at build time
+const GRPC_ENDPOINT: &str = match option_env!("GRPC_ENDPOINT") {
+    Some(endpoint) => endpoint,
+    None => "http://[::1]:50051",
+};
+
 #[component]
 pub fn LoginWindow(is_logged_in: WriteSignal<bool>, username_handle: WriteSignal<String>) -> impl IntoView {
     let (username, set_username) = signal(String::new());
@@ -16,13 +22,16 @@ pub fn LoginWindow(is_logged_in: WriteSignal<bool>, username_handle: WriteSignal
     #[server]
     pub async fn join(username: String) -> Result<bool, ServerFnError> {
         use backend::proto::chat_service_client::*;
-        let mut client = ChatServiceClient::connect("https://[::1]:50051")
+        let mut client = ChatServiceClient::connect(GRPC_ENDPOINT)
             .await
-            .expect("Failed to esablish connection with backend");
+            .map_err(|e| ServerFnError::new(format!("Failed to establish connection with backend: {}", e)))?;
 
         let request = tonic::Request::new(backend::proto::User{ id: "0".into(), name: username });
 
-        let response = client.join(request).await.expect("failed to query login").into_inner();
+        let response = client.join(request)
+            .await
+            .map_err(|e| ServerFnError::new(format!("Failed to query login: {}", e)))?
+            .into_inner();
 
         Ok(response.error == 0)
     }
@@ -96,47 +105,61 @@ pub fn ChatWindow(username: String) -> impl IntoView {
         use backend::proto::*;
         use futures::Stream;
 
-        pub async fn recv_message() -> impl Stream<Item = Result<ChatMessage, tonic::Status>> {
+        pub async fn recv_message() -> Result<impl Stream<Item = Result<ChatMessage, tonic::Status>>, Box<dyn std::error::Error>> {
             use chat_service_client::ChatServiceClient;
-            let mut client = ChatServiceClient::connect("http://[::1]:50051")
-                .await
-                .expect("Failed to establish connection with backend");
+            let mut client = ChatServiceClient::connect(super::GRPC_ENDPOINT)
+                .await?;
 
             let request = tonic::Request::new(Empty {});
 
-            client
+            let stream = client
                 .recieve_msg(request)
-                .await
-                .expect("Couldn't obtain stream")
-                .into_inner()
+                .await?
+                .into_inner();
+
+            Ok(stream)
         }
     }
 
     #[server(output = Streaming)]
     pub async fn handle_messages() -> Result<ByteStream, ServerFnError> {
-        let stream = chat_recv::recv_message().await;
+        let stream = chat_recv::recv_message()
+            .await
+            .map_err(|e| ServerFnError::new(format!("Failed to initialize message stream: {}", e)))?;
 
-        // let data = stream.map(|message| Ok(message.unwrap().msg));
-        let data = stream.map(|message| {
-            let mut buf = vec![];
-            message
-                .unwrap()
-                .encode(&mut buf)
-                .expect("Couldn't convert to byte array");
-            Ok(buf)
+        let data = stream.filter_map(|message| async move {
+            match message {
+                Ok(msg) => {
+                    let mut buf = vec![];
+                    match msg.encode(&mut buf) {
+                        Ok(_) => Some(Ok(buf)),
+                        Err(e) => {
+                            leptos::logging::error!("Failed to encode message: {:?}", e);
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    leptos::logging::error!("Stream error: {:?}", e);
+                    None
+                }
+            }
         });
         Ok(ByteStream::new(data))
     }
 
     Effect::new(move |_| {
         spawn_local(async move {
-            let mut stream = handle_messages()
-                .await
-                .expect("Couldn't initialize stream")
-                .into_inner();
-
-            while let Some(Ok(message)) = stream.next().await {
-                set_messages.update(|messages| messages.push(message));
+            match handle_messages().await {
+                Ok(byte_stream) => {
+                    let mut stream = byte_stream.into_inner();
+                    while let Some(Ok(message)) = stream.next().await {
+                        set_messages.update(|messages| messages.push(message));
+                    }
+                }
+                Err(e) => {
+                    leptos::logging::error!("Failed to initialize message stream: {:?}", e);
+                }
             }
         });
     });
@@ -146,8 +169,15 @@ pub fn ChatWindow(username: String) -> impl IntoView {
             .get()
             .iter()
             .rev()
-            .map(|message| Message::decode(&message[..]).expect("Failed to decode")) //https://www.gravatar.com/avatar/00000000000000000000000000000000?d=identicon&f=y
-            .inspect(|msg: &ChatMessage| println!("{:?}", msg.from))
+            .filter_map(|message| {
+                match Message::decode(&message[..]) {
+                    Ok(msg) => Some(msg),
+                    Err(e) => {
+                        leptos::logging::error!("Failed to decode message: {:?}", e);
+                        None
+                    }
+                }
+            })
             .map(|message: ChatMessage| {
                 view! {
                     <div class={ if message.from == username { "chat chat-start" } else { "chat chat-end" }}>
@@ -236,7 +266,11 @@ fn HomePage() -> impl IntoView {
                                 let message = message.get();
                                 let username = username.get();
 
-                                spawn_local(async { let _ = send_message(username, message).await; });
+                                spawn_local(async move {
+                                    if let Err(e) = send_message(username, message).await {
+                                        leptos::logging::error!("Failed to send message: {:?}", e);
+                                    }
+                                });
                                 set_message.set("".into());
                             }>"Send"</button>
                         </div>
@@ -252,7 +286,7 @@ fn HomePage() -> impl IntoView {
 pub async fn send_message(from: String, msg: String) -> Result<(), ServerFnError> {
     use chrono::{Local, Timelike};
     use backend::proto::chat_service_client::ChatServiceClient;
-    let mut client = ChatServiceClient::connect("http://[::1]:50051").await?;
+    let mut client = ChatServiceClient::connect(GRPC_ENDPOINT).await?;
     let current_time = Local::now();
 
     let request = tonic::Request::new(backend::proto::ChatMessage {
